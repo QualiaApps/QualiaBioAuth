@@ -77,6 +77,7 @@
 mod error;
 
 pub mod format;
+pub mod host;
 pub mod key;
 #[cfg(any(test, feature = "mock"))]
 pub mod mock;
@@ -84,5 +85,6 @@ pub mod platform;
 pub mod traits;
 
 pub use error::{Error, Result};
+pub use host::{DelegatingKeyStore, PlatformSealer};
 pub use key::{MASTER_KEY_LEN, MasterKey};
 pub use traits::{AuthBoundKeyStore, Availability, Backend};
