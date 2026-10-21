@@ -401,6 +401,10 @@ impl AuthBoundKeyStore for WindowsKeyStore {
         }
         Ok(())
     }
+
+    fn delete_blob(&self, blob: &[u8]) -> Result<()> {
+        WindowsKeyStore::delete_blob(self, blob)
+    }
 }
 
 /// The WebAuthn API version this Windows build exposes.

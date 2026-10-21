@@ -72,6 +72,10 @@ impl AuthBoundKeyStore for UnsupportedKeyStore {
         })
     }
 
+    fn delete_blob(&self, _blob: &[u8]) -> Result<()> {
+        Ok(())
+    }
+
     fn delete(&self) -> Result<()> {
         Ok(())
     }

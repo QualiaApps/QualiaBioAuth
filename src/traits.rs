@@ -182,6 +182,15 @@ pub trait AuthBoundKeyStore: core::fmt::Debug + Send + Sync {
     /// another backend is rejected with [`Error::WrongBackend`] rather than parsed.
     fn unwrap(&self, blob: &[u8]) -> Result<MasterKey>;
 
+    /// Deletes the platform key or credential named by `blob`.
+    ///
+    /// Used when the application turns the second path off after a restart: the blob is
+    /// still on disk, but the store no longer remembers the credential it names. A backend
+    /// whose platform material is fixed (one alias per device) may implement this as
+    /// [`AuthBoundKeyStore::delete`]. A blob from another backend is rejected with
+    /// [`Error::WrongBackend`] rather than deleting this backend's unrelated credential.
+    fn delete_blob(&self, blob: &[u8]) -> Result<()>;
+
     /// Deletes the platform key or credential.
     ///
     /// Idempotent: deleting a store that holds nothing succeeds. The application is

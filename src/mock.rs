@@ -184,6 +184,12 @@ impl AuthBoundKeyStore for MockKeyStore {
         Ok(value)
     }
 
+    fn delete_blob(&self, blob: &[u8]) -> Result<()> {
+        let blob = AuthBlob::parse(blob)?;
+        blob.expect_backend(Backend::Mock)?;
+        self.delete()
+    }
+
     fn delete(&self) -> Result<()> {
         let mut guard = self.kek.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(mut key) = guard.take() {
@@ -295,6 +301,25 @@ mod tests {
         let fresh = MasterKey::generate().expect("randomness");
         let new_blob = store.wrap(&fresh).expect("wrap after delete");
         assert_eq!(store.unwrap(&new_blob).expect("unwrap"), fresh);
+    }
+
+    /// Deleting by blob checks the backend and wipes the same key.
+    #[test]
+    fn delete_blob_removes_the_key() {
+        let store = MockKeyStore::new();
+        let master = MasterKey::generate().expect("randomness");
+        let blob = store.wrap(&master).expect("wrap");
+        store.delete_blob(&blob).expect("delete by blob");
+        assert!(!store.has_key());
+        assert!(store.unwrap(&blob).is_err());
+
+        let mut wrong_backend = blob;
+        wrong_backend[BACKEND_OFFSET] = 2;
+        let store = MockKeyStore::new();
+        assert!(matches!(
+            store.delete_blob(&wrong_backend),
+            Err(Error::WrongBackend { .. })
+        ));
     }
 
     /// `create` is idempotent and leaves the existing key alone.
