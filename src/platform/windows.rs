@@ -132,9 +132,6 @@ const NTE_AUTHENTICATION_IGNORED: i32 = 0x8009_0031_u32 as i32;
 /// `NTE_NOT_SUPPORTED`: the platform authenticator cannot perform this operation.
 const NTE_NOT_SUPPORTED: i32 = 0x8009_0029_u32 as i32;
 
-/// `NTE_INVALID_PARAMETER`: the platform rejected the request shape.
-const NTE_INVALID_PARAMETER: i32 = 0x8009_0027_u32 as i32;
-
 /// `NTE_DEVICE_NOT_READY`: no usable authenticator is enrolled.
 const NTE_DEVICE_NOT_READY: i32 = 0x8009_0030_u32 as i32;
 
@@ -716,13 +713,20 @@ fn delete_credential(credential_id: &[u8]) -> Result<()> {
 }
 
 /// Maps a WebAuthn HRESULT to the crate's error.
+///
+/// `NTE_INVALID_PARAMETER` is deliberately **not** folded into `Unavailable`: on a machine
+/// where the request shape is the problem, the HRESULT is the only thing that says so. It
+/// becomes a `Platform` error with the code, which the diagnostic prints in full.
 fn map_status(operation: &'static str, status: i32) -> Error {
     match status {
         NTE_USER_CANCELLED | ERROR_CANCELLED | NTE_AUTHENTICATION_IGNORED => {
             Error::AuthenticationFailed
         }
-        NTE_NOT_SUPPORTED | NTE_INVALID_PARAMETER | NTE_DEVICE_NOT_READY => Error::Unavailable {
-            reason: "Windows Hello is not enrolled for this user, or the platform authenticator refused the request",
+        NTE_NOT_SUPPORTED => Error::Unavailable {
+            reason: "the platform authenticator does not support the hmac-secret extension",
+        },
+        NTE_DEVICE_NOT_READY => Error::Unavailable {
+            reason: "Windows Hello is not ready for this user; enroll Hello or unlock the session",
         },
         _ => Error::Platform {
             operation,
