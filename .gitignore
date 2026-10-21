@@ -1,0 +1,18 @@
+# Rust 构建产物
+/target
+
+# 编辑器 / IDE
+.vscode/
+.idea/
+*.iml
+
+# 操作系统
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+
+# 本地环境与密钥（严禁提交任何 2FA 密钥材料）
+.env
+*.local.toml
+secrets/

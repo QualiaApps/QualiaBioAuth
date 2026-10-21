@@ -1,0 +1,137 @@
+name: CI
+
+# Note: the repository root is the crate root (crate `qualia-bioauth`), and every job
+# runs from the repository root.
+#
+# This crate is an independent library, so CI focuses on:
+#   1. confirming the platform backends **really compile** -- the `unsafe` surface
+#      and the platform API bindings are checked by the compiler only on their own
+#      target, and they cannot be verified on a machine without it
+#   2. confirming **non-Windows platforms also build** -- each backend is narrowed
+#      by `cfg`, and one wrong condition breaks another platform's build, which
+#      only shows up during downstream builds at high cost
+#   3. confirming the mock feature combination works -- the tests and the
+#      documentation examples rely on it
+#   4. confirming the MSRV still holds
+
+# A branch pushed inside this repository starts **two** runs for the same commit: one for
+# the `push` and one for the `pull_request`. Only the second one is about the change under
+# review, so `push` is limited to `master` and every other change arrives through its pull
+# request. Branches in forks never produce a `push` run to begin with.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── Job 1: fmt, lint, tests (Windows, the only platform with a backend) ─────
+  check-windows:
+    name: fmt + clippy + test (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      # `--features mock` enables the only backend that is always available, so
+      # this job exercises the format, the trait and the mock together.
+      - name: cargo clippy (-D warnings)
+        run: cargo clippy --all-targets --features mock -- -D warnings
+
+      - name: cargo test
+        run: cargo test --all-targets --features mock
+
+      - name: cargo doc (no warnings)
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      # The backend in the documentation examples is `MockKeyStore`, which exists
+      # only under the `mock` feature. The examples are therefore only really
+      # compiled with that feature **enabled** -- the default run skips them, so
+      # "the example is broken" only shows up here.
+      - name: cargo test --doc --features mock
+        run: cargo test --doc --features mock
+
+  # ── Job 2: non-Windows platforms must build as well ─────────────────────────
+  # Each backend is narrowed by `cfg`. This job proves that on a machine with no
+  # platform backend at all, this crate still compiles and passes the
+  # hardware-independent tests -- including the `mock` backend and the
+  # abstraction layer itself.
+  check-linux:
+    name: non-Windows build + mock backend tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy (-D warnings)
+        run: cargo clippy --all-targets --features mock -- -D warnings
+
+      # On Linux, `mock` is the **only** available backend. Running it verifies
+      # both that the abstraction layer works and that the `cfg` narrowing did not
+      # break non-Windows platforms.
+      - name: cargo test --features mock
+        run: cargo test --features mock --all-targets
+
+      # The Android backend is narrowed to that target, so nothing above compiles
+      # it: on Linux it is excluded exactly like any other platform this machine
+      # is not. Cross-checking is what compiles it, and `-D warnings` is what makes
+      # the check worth as much as the others -- `clippy` and `check` do not link,
+      # so no NDK is needed for either.
+      - name: Install the Android target
+        run: rustup target add aarch64-linux-android
+
+      - name: cargo clippy --target aarch64-linux-android (-D warnings)
+        run: cargo clippy --target aarch64-linux-android --lib -- -D warnings
+
+  # ── Job 3: MSRV ─────────────────────────────────────────────────────────────
+  msrv:
+    name: MSRV 1.89
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+
+      # The MSRV is verified with a **real toolchain**, rather than by trusting the
+      # `rust-version` field. It runs on Linux to save time: the MSRV concerns
+      # language and dependency features, not the platform backend, whose
+      # compilation the Windows job already covers.
+      - name: Install the 1.89 toolchain
+        run: rustup toolchain install 1.89 --profile minimal
+
+      - name: cargo +1.89 check (with the mock feature)
+        run: cargo +1.89 check --all-targets --features mock
+
+  # ── Job 4: dependency audit ─────────────────────────────────────────────────
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+
+      # This crate holds platform keystore handles directly, so every extra
+      # dependency is attack surface.
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: cargo deny check
+        run: cargo deny check
