@@ -32,10 +32,11 @@ English version: [README.en.md](README.en.md).
 - **Windows 后端**：Windows Hello 凭据 + WebAuthn `hmac-secret`，平台释放的 32 字节
   作为包裹密钥。
 
-Windows 后端要求平台的认证器真的启用 PRF 扩展。**Windows 11 23H2（WebAuthn API 版本 7）
-实测：凭据能创建，但 `bPrfEnabled = 0`、扩展输出为空；此时本库返回
-`Unavailable`，不会退回软件密钥，口令路径不受影响。** 需要一台平台认证器启用 PRF 的
-Windows 机器才能完成运行时验收。
+Windows 后端要求平台认证器真的能在 `GetAssertion` 里返回 `hmac-secret`。attestation 里的
+`bPrfEnabled` **不作为判据**：Windows 11 23H2 实测会创建凭据但把该字段留成 0。库不信任
+这个字段，第一次断言就是判据——返回 32 字节则成功，被拒绝或没有返回 hmac-secret 才报
+`Unavailable`。因此浏览器 PRF demo 能成功并不等于原生 Win32 API 也能成功，验收必须跑本库的
+`hello_probe`。
 
 Android Keystore 后端仍在实现中。**在它落地之前，Android 上不要把本库当成提供平台认证
 保护的库**；`availability()` 会如实报告 `Unsupported`。

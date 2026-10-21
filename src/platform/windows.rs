@@ -54,15 +54,16 @@
 //! `hardware_backed` is reported as `false`: the Win32 WebAuthn API does not say
 //! whether the platform authenticator is TPM-backed, and this crate does not guess.
 //!
-//! # Known limitation
+//! # Reading the PRF flag
 //!
-//! On Windows 11 23H2 (WebAuthn API version 7) the platform authenticator creates the
-//! credential but reports the PRF extension as **not enabled** (`bPrfEnabled = 0`, no
-//! extension output), even when the `hmac-secret` extension and `bEnablePrf` are both
-//! requested. `create` therefore returns [`Error::Unavailable`], and the store remembers
-//! that answer so later `availability` calls report it instead of offering the path
-//! again. A Windows build whose platform authenticator enables PRF is required for this
-//! backend to work; the password unlock path is unaffected.
+//! The attestation's `bPrfEnabled` field is **not** trusted. On Windows 11 23H2 (WebAuthn
+//! API version 7) the credential is created with the `hmac-secret` extension requested but
+//! `bPrfEnabled` stays zero; a build that fills the field is not guaranteed either. The
+//! first `GetAssertion` is the ground truth: it either returns the 32-byte secret or it
+//! does not. When it fails with a permanent refusal the store remembers that and reports
+//! [`Error::Unavailable`] on later calls; the password path is unaffected. A browser demo
+//! succeeding on the same machine is a reason to test the assertion, not to trust the
+//! attestation flag.
 
 mod payload;
 
@@ -250,6 +251,26 @@ impl WindowsKeyStore {
             .unwrap_or_else(PoisonError::into_inner) = Some(reason);
     }
 
+    /// Asks the platform for the `hmac-secret`, remembering a permanent refusal.
+    ///
+    /// The attestation's PRF flag is **not** trusted: on some Windows builds the credential
+    /// is created with the extension enabled but `bPrfEnabled` is left at zero. The assertion
+    /// is the ground truth — it either returns the secret or it does not.
+    fn hmac_secret(
+        &self,
+        credential_id: &[u8],
+        salt: &[u8; payload::SALT_LEN],
+    ) -> Result<[u8; 32]> {
+        match get_hmac_secret(foreground_window(), credential_id, salt) {
+            Ok(secret) => Ok(secret),
+            Err(Error::Unavailable { reason }) => {
+                self.remember_unavailable(reason);
+                Err(Error::Unavailable { reason })
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// A copy of the current credential id, if any.
     fn current_credential(&self) -> Option<Vec<u8>> {
         self.credential
@@ -299,7 +320,7 @@ impl AuthBoundKeyStore for WindowsKeyStore {
 
         let mut salt = [0_u8; payload::SALT_LEN];
         random_bytes(&mut salt)?;
-        let mut hmac_secret = get_hmac_secret(foreground_window(), &credential_id, &salt)?;
+        let mut hmac_secret = self.hmac_secret(&credential_id, &salt)?;
 
         let mut nonce = [0_u8; payload::NONCE_LEN];
         random_bytes(&mut nonce)?;
@@ -343,8 +364,7 @@ impl AuthBoundKeyStore for WindowsKeyStore {
             .operation
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        let mut hmac_secret =
-            get_hmac_secret(foreground_window(), payload.credential_id(), payload.salt())?;
+        let mut hmac_secret = self.hmac_secret(payload.credential_id(), payload.salt())?;
 
         let aad = associated_data(payload.credential_id(), payload.salt());
         let cipher = XChaCha20Poly1305::new(&Key::from(hmac_secret));
@@ -547,22 +567,20 @@ fn make_credential(hwnd: HWND) -> Result<Vec<u8>> {
         });
     }
 
-    let (credential_id, prf_enabled) = {
+    let credential_id = {
         // SAFETY: the API returned a valid, live attestation.
         let attestation = unsafe { &*attestation };
-        let extension_says_enabled = hmac_extension_reported(&attestation.Extensions);
         if attestation.pbCredentialId.is_null() {
-            (Vec::new(), false)
+            Vec::new()
         } else {
             // SAFETY: the API reports a valid credential id and its length.
-            let id = unsafe {
+            unsafe {
                 std::slice::from_raw_parts(
                     attestation.pbCredentialId,
                     attestation.cbCredentialId as usize,
                 )
             }
-            .to_vec();
-            (id, attestation.bPrfEnabled != 0 || extension_says_enabled)
+            .to_vec()
         }
     };
     // SAFETY: the attestation is owned by this call and freed exactly once.
@@ -573,57 +591,7 @@ fn make_credential(hwnd: HWND) -> Result<Vec<u8>> {
             reason: "the platform returned an unusable credential id",
         });
     }
-    if !prf_enabled {
-        return Err(Error::Unavailable {
-            reason: "the platform authenticator did not enable the PRF (hmac-secret) extension",
-        });
-    }
     Ok(credential_id)
-}
-
-/// Returns whether an attestation reports the `hmac-secret` extension as enabled.
-///
-/// The API has two ways of saying yes: the dedicated `bPrfEnabled` field and the
-/// extension output list. Checking both keeps a platform that only fills one of them
-/// from turning a supported credential into a false negative.
-fn hmac_extension_reported(extensions: &WEBAUTHN_EXTENSIONS) -> bool {
-    if extensions.cExtensions == 0 || extensions.pExtensions.is_null() {
-        return false;
-    }
-    for index in 0..extensions.cExtensions as usize {
-        // SAFETY: the API reported this many extension entries at a non-null pointer.
-        let extension = unsafe { &*extensions.pExtensions.add(index) };
-        if !wide_equals(extension.pwszExtensionIdentifier, "hmac-secret") {
-            continue;
-        }
-        if extension.cbExtension != 4 || extension.pvExtension.is_null() {
-            continue;
-        }
-        // SAFETY: the `hmac-secret` output type is a 4-byte BOOL.
-        let enabled = unsafe { *(extension.pvExtension as *const i32) };
-        if enabled != 0 {
-            return true;
-        }
-    }
-    false
-}
-
-/// Compares a NUL-terminated wide string to `text`.
-fn wide_equals(pointer: windows_sys::core::PCWSTR, text: &str) -> bool {
-    if pointer.is_null() {
-        return false;
-    }
-    let mut index = 0_usize;
-    for unit in text.encode_utf16() {
-        // SAFETY: the caller passes a NUL-terminated string; the loop stops at the
-        // first mismatch, so it never reads past a matching string's terminator.
-        if unsafe { *pointer.add(index) } != unit {
-            return false;
-        }
-        index += 1;
-    }
-    // SAFETY: reading the terminator of the string that matched every character above.
-    unsafe { *pointer.add(index) == 0 }
 }
 
 /// Runs one assertion and returns the 32-byte `hmac-secret`.
@@ -726,8 +694,8 @@ fn get_hmac_secret(
     // was copied out above.
     unsafe { WebAuthNFreeAssertion(assertion) };
 
-    secret.ok_or(Error::WrappedPayloadInvalid {
-        reason: "the platform did not return a 32-byte hmac-secret",
+    secret.ok_or(Error::Unavailable {
+        reason: "the platform assertion did not include a 32-byte hmac-secret",
     })
 }
 
@@ -891,7 +859,7 @@ mod tests {
         }
 
         match store.create() {
-            Ok(()) => println!("create: ok (Hello prompt completed)"),
+            Ok(()) => println!("create: ok"),
             Err(Error::Unavailable { reason }) => {
                 println!("RESULT: PRF UNAVAILABLE: {reason}");
                 assert!(matches!(
@@ -904,7 +872,18 @@ mod tests {
         }
 
         let master = MasterKey::generate().expect("randomness");
-        let blob = store.wrap(&master).expect("wrap (Hello prompt)");
+        let blob = match store.wrap(&master) {
+            Ok(blob) => blob,
+            Err(Error::Unavailable { reason }) => {
+                println!("RESULT: PRF UNAVAILABLE: {reason}");
+                assert!(matches!(
+                    store.availability(),
+                    Availability::Unavailable { .. }
+                ));
+                return;
+            }
+            Err(error) => panic!("wrap failed: {error}"),
+        };
         println!("wrap: ok");
         let restored = store.unwrap(&blob).expect("unwrap (Hello prompt)");
         assert_eq!(restored, master);

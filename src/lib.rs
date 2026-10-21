@@ -66,10 +66,11 @@
 //! - Implemented: the outer format, the key type, the trait, the mock backend, the
 //!   unsupported fallback, and the Windows backend (Windows Hello through WebAuthn
 //!   `hmac-secret`).
-//! - The Windows backend requires a Windows build whose platform authenticator enables
-//!   the PRF extension. Measured on Windows 11 23H2 (WebAuthn API version 7): the
-//!   credential is created, PRF stays disabled, and the store reports
-//!   [`Availability::Unavailable`]; the password path is unaffected.
+//! - The Windows backend does not trust the attestation's `bPrfEnabled` flag; the first
+//!   `GetAssertion` is the test. On Windows 11 23H2 (WebAuthn API version 7) the credential
+//!   is created with the flag at zero and the assertion returns without the secret, so the
+//!   store reports [`Availability::Unavailable`]; the password path is unaffected. A machine
+//!   where the assertion succeeds works even when the flag is zero.
 //! - Planned: the Android Keystore backend. Until it is present, Android reports
 //!   [`platform::stub::UnsupportedKeyStore`] and the password path is the only way in.
 

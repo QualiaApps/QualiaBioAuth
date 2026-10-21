@@ -70,6 +70,11 @@ fn main() {
             println!("wrap: ok");
             blob
         }
+        Err(qualia_bioauth::Error::Unavailable { reason }) => {
+            let _ = store.delete();
+            println!("RESULT: PRF UNAVAILABLE: {reason}");
+            return;
+        }
         Err(error) => {
             let _ = store.delete();
             println!("RESULT: FAILED at wrap: {error}");
@@ -83,6 +88,11 @@ fn main() {
             let _ = store.delete();
             println!("RESULT: FAILED: the unwrapped key differs from the original");
             std::process::exit(1);
+        }
+        Err(qualia_bioauth::Error::Unavailable { reason }) => {
+            let _ = store.delete();
+            println!("RESULT: PRF UNAVAILABLE: {reason}");
+            return;
         }
         Err(error) => {
             let _ = store.delete();

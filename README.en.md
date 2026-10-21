@@ -38,12 +38,12 @@ application fails closed; it never falls back to a software key.
 - the **Windows backend**: a Windows Hello credential plus WebAuthn `hmac-secret`,
   whose platform-released 32 bytes are the wrapping key.
 
-The Windows backend requires the platform authenticator to actually enable the PRF
-extension. **Measured on Windows 11 23H2 (WebAuthn API version 7): the credential is
-created but `bPrfEnabled = 0` and the extension output is empty; the crate then reports
-`Unavailable` instead of falling back to a software key, and the password path is
-unaffected.** A Windows machine whose platform authenticator enables PRF is needed for
-the runtime acceptance run.
+The Windows backend requires the platform authenticator to actually return `hmac-secret` in
+`GetAssertion`. The attestation's `bPrfEnabled` is **not** the criterion: Windows 11 23H2
+creates the credential and leaves that field at zero. The crate does not trust it; the first
+assertion is the test — a 32-byte secret means it works, a refusal **or an assertion without
+the secret** means `Unavailable`. A browser PRF demo succeeding is therefore not proof for
+the native Win32 API; acceptance has to run this crate's `hello_probe`.
 
 The Android Keystore backend is still being implemented. **Until it lands, do not treat
 this crate as one that provides platform authentication on Android**; `availability()`
