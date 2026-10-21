@@ -92,7 +92,7 @@ use windows_sys::Win32::Networking::WindowsWebServices::{
 use windows_sys::Win32::Security::Cryptography::{
     BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+use windows_sys::Win32::UI::WindowsAndMessaging::{GetDesktopWindow, GetForegroundWindow};
 use zeroize::Zeroize;
 
 /// Relying-party identifier used for the credential.
@@ -438,10 +438,21 @@ fn availability() -> Availability {
     }
 }
 
-/// Returns the foreground window, or null when there is none.
+/// Returns a non-null window a WebAuthn prompt can be parented to.
+///
+/// The foreground window is the natural choice, but it can be null (a process without a
+/// foreground window, a terminal that owns none, a remote session). Passing null to
+/// `WebAuthNAuthenticatorMakeCredential` is rejected with `NTE_INVALID_PARAMETER`
+/// (`0x80090027`), which looks exactly like "PRF unsupported" and hides the real cause.
+/// The desktop window always exists and the API accepts it, so it is the fallback.
 fn foreground_window() -> HWND {
     // SAFETY: no arguments and no preconditions; null is a valid answer.
-    unsafe { GetForegroundWindow() }
+    let foreground = unsafe { GetForegroundWindow() };
+    if !foreground.is_null() {
+        return foreground;
+    }
+    // SAFETY: no arguments and no preconditions; the desktop window always exists.
+    unsafe { GetDesktopWindow() }
 }
 
 /// Fills `out` with random bytes from the system CSPRNG.
@@ -787,6 +798,12 @@ mod tests {
                 other => panic!("unexpected availability: {other:?}"),
             }
         }
+    }
+
+    /// The prompt parent is always non-null; a null parent is `NTE_INVALID_PARAMETER`.
+    #[test]
+    fn the_prompt_parent_is_never_null() {
+        assert!(!foreground_window().is_null());
     }
 
     /// Deleting a store that holds nothing succeeds.
