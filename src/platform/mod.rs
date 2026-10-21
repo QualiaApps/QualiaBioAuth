@@ -20,13 +20,42 @@
 //!
 //! # Current state
 //!
-//! - [`stub`]: the honest "this build cannot do it" backend, used everywhere until a
-//!   real backend is wired for that platform.
-//! - Android Keystore and Windows WebAuthn are planned. Their design is fixed by the
-//!   rule that the **platform** must release the key: a prompt whose success is only
-//!   checked in user-mode is not a backend.
+//! - `windows`: Windows Hello through the Win32 WebAuthn `hmac-secret` extension.
+//! - [`stub`]: the honest "this build cannot do it" backend, used everywhere a real
+//!   backend is not wired yet.
+//! - Android Keystore is planned. Its design is fixed by the rule that the
+//!   **platform** must release the key: a prompt whose success is only checked in
+//!   user-mode is not a backend.
 //!
 //! A platform without a backend must report [`crate::Availability::Unsupported`],
 //! never a software key that pretends to be protected.
 
 pub mod stub;
+
+#[cfg(target_os = "windows")]
+pub mod windows;
+
+use crate::traits::AuthBoundKeyStore;
+
+/// Opens the best auth-bound store this build has for the current platform.
+///
+/// The returned value always exists; ask [`AuthBoundKeyStore::availability`] before
+/// offering the platform-authentication path. On a platform without a backend this is
+/// [`stub::UnsupportedKeyStore`], which reports the truth and refuses every operation.
+///
+/// The store holds no credential until it is used, so calling this at startup does not
+/// prompt and does not touch the platform.
+#[must_use]
+pub fn open_best_available() -> Box<dyn AuthBoundKeyStore> {
+    #[cfg(target_os = "windows")]
+    {
+        Box::new(windows::WindowsKeyStore::new())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Box::new(stub::UnsupportedKeyStore::new(
+            "this build has no auth-bound key backend for this platform",
+        ))
+    }
+}

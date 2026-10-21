@@ -27,18 +27,27 @@ application fails closed; it never falls back to a software key.
 
 ## Status
 
-0.1.0 is in development. The platform-independent parts are in place:
+0.1.0 is in development. The following parts are in place:
 
 - the outer `Q2FABIO1` format (magic, version, backend, length, backend-private
   payload);
 - `MasterKey` (32 bytes, `Zeroize`, `Debug` prints nothing);
 - the `AuthBoundKeyStore` trait and `Availability`;
 - the test-only `MockKeyStore` (`mock` feature) and the honest
-  `UnsupportedKeyStore`.
+  `UnsupportedKeyStore`;
+- the **Windows backend**: a Windows Hello credential plus WebAuthn `hmac-secret`,
+  whose platform-released 32 bytes are the wrapping key.
 
-The Windows Hello and Android Keystore backends are still being implemented. **Until
-they land, do not treat this crate as one that already provides platform
-authentication**: `availability()` reports exactly what the current build can do.
+The Windows backend requires the platform authenticator to actually enable the PRF
+extension. **Measured on Windows 11 23H2 (WebAuthn API version 7): the credential is
+created but `bPrfEnabled = 0` and the extension output is empty; the crate then reports
+`Unavailable` instead of falling back to a software key, and the password path is
+unaffected.** A Windows machine whose platform authenticator enables PRF is needed for
+the runtime acceptance run.
+
+The Android Keystore backend is still being implemented. **Until it lands, do not treat
+this crate as one that provides platform authentication on Android**; `availability()`
+reports `Unsupported` there.
 
 ## Usage
 

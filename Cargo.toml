@@ -42,20 +42,23 @@ subtle = { version = "2.6", default-features = false }
 # reachable under the `mock` feature or in tests.
 getrandom = { version = "0.4.3", optional = true }
 
-# The mock backend's authenticated encryption. Optional: a production build carries
-# no software path that could be mistaken for platform authentication.
-chacha20poly1305 = { version = "0.11.0", optional = true }
+# The authenticated encryption used by the mock backend and by the Windows backend
+# (the `hmac-secret` output is a 32-byte key, and the wrapped master key is encrypted
+# with XChaCha20-Poly1305).
+chacha20poly1305 = "0.11.0"
 
 # Windows Hello through the Win32 WebAuthn API. `windows-sys` links directly
 # against `webauthn.dll`; no `LoadLibrary` is involved.
 #
-# Only the modules this crate calls are enabled: the Foundation types (`HWND`) and
-# the WebAuthn surface. Keep this list minimal, since windows-sys features are
-# module switches that each add compile time.
+# Only the modules this crate calls are enabled: the Foundation types (`HWND`), the
+# WebAuthn surface, `BCryptGenRandom` for fresh challenges, and
+# `GetForegroundWindow` to parent the Hello prompt.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Security_Cryptography",
     "Win32_Networking_WindowsWebServices",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [features]
@@ -63,13 +66,12 @@ windows-sys = { version = "0.61", features = [
 #
 # **Off by default.** The mock has no user authentication at all; it exists so that
 # tests of the format and the state machine do not need a TPM or a fingerprint.
-mock = ["dep:getrandom", "dep:chacha20poly1305"]
+mock = ["dep:getrandom"]
 
 [dev-dependencies]
 # `cfg(test)` builds the mock module even without `--features mock`, so the
 # dependencies it needs must be present for tests too.
 getrandom = "0.4.3"
-chacha20poly1305 = "0.11.0"
 
 [lints.rust]
 missing_docs = "warn"

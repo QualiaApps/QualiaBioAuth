@@ -63,11 +63,15 @@
 //!
 //! # Status
 //!
-//! - Implemented: the outer format, the key type, the trait, the mock backend and the
-//!   unsupported fallback.
-//! - Planned: the Windows WebAuthn backend and the Android Keystore backend. Until
-//!   they are present, [`platform::stub::UnsupportedKeyStore`] reports the platform
-//!   honestly and the password path remains the only way in.
+//! - Implemented: the outer format, the key type, the trait, the mock backend, the
+//!   unsupported fallback, and the Windows backend (Windows Hello through WebAuthn
+//!   `hmac-secret`).
+//! - The Windows backend requires a Windows build whose platform authenticator enables
+//!   the PRF extension. Measured on Windows 11 23H2 (WebAuthn API version 7): the
+//!   credential is created, PRF stays disabled, and the store reports
+//!   [`Availability::Unavailable`]; the password path is unaffected.
+//! - Planned: the Android Keystore backend. Until it is present, Android reports
+//!   [`platform::stub::UnsupportedKeyStore`] and the password path is the only way in.
 
 mod error;
 
