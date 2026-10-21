@@ -23,7 +23,7 @@ English version: [README.en.md](README.en.md).
 
 ## 当前状态
 
-0.1.0 正在开发中。已经落地的是：
+0.1.0 已实现 Windows 后端，Android 后端尚未落地：
 
 - 外层格式 `Q2FABIO1`（magic + 版本 + 后端 + 长度 + 平台私有载荷）；
 - `MasterKey`（32 字节、`Zeroize`、`Debug` 不打印内容）；
@@ -37,6 +37,15 @@ Windows 后端要求平台认证器真的能在 `GetAssertion` 里返回 `hmac-s
 这个字段，第一次断言就是判据——返回 32 字节则成功，被拒绝或没有返回 hmac-secret 才报
 `Unavailable`。因此浏览器 PRF demo 能成功并不等于原生 Win32 API 也能成功，验收必须跑本库的
 `hello_probe`。
+
+WebAuthn API 版本同样决定结构体：API 9 的运行时（Windows 11 25H2）拒绝 v7 的
+`WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS`（`NTE_INVALID_PARAMETER`），必须用
+v9 布局，其中 PRF 的创建期入口是 `pPRFGlobalEval`。库按 `WebAuthNGetApiVersionNumber`
+选择布局，并在 x64 上用编译期断言钉住结构体大小。
+
+**Windows L3 验收已通过**（API 9，`create` / `wrap` / `unwrap` / `delete` 全绿：
+`RESULT: roundtrip OK`）。验收依赖三件事，缺一都会得到误导性的错误码：本地磁盘上的进程
+镜像、非 null 的父窗口、以及支持 PRF 的 Windows 版本。
 
 Android Keystore 后端仍在实现中。**在它落地之前，Android 上不要把本库当成提供平台认证
 保护的库**；`availability()` 会如实报告 `Unsupported`。

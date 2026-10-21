@@ -27,7 +27,7 @@ application fails closed; it never falls back to a software key.
 
 ## Status
 
-0.1.0 is in development. The following parts are in place:
+0.1.0 implements the Windows backend; the Android backend is not in yet:
 
 - the outer `Q2FABIO1` format (magic, version, backend, length, backend-private
   payload);
@@ -44,6 +44,17 @@ creates the credential and leaves that field at zero. The crate does not trust i
 assertion is the test — a 32-byte secret means it works, a refusal **or an assertion without
 the secret** means `Unavailable`. A browser PRF demo succeeding is therefore not proof for
 the native Win32 API; acceptance has to run this crate's `hello_probe`.
+
+The WebAuthn API version picks the structure as well: an API 9 runtime (Windows 11 25H2)
+rejects the version 7 `WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS` with
+`NTE_INVALID_PARAMETER`, so the version 9 layout is required, where `pPRFGlobalEval` is the
+creation-time PRF entry. The crate selects the layout by `WebAuthNGetApiVersionNumber` and
+pins the structure size with a compile-time assertion on x64.
+
+**Windows L3 acceptance has passed** (API 9; `create`, `wrap`, `unwrap` and `delete` all
+succeeded: `RESULT: roundtrip OK`). Three conditions decide the run and each of them
+produces a misleading error code when missing: a process image on a local disk, a non-null
+parent window, and a Windows build whose platform authenticator enables PRF.
 
 The Android Keystore backend is still being implemented. **Until it lands, do not treat
 this crate as one that provides platform authentication on Android**; `availability()`
