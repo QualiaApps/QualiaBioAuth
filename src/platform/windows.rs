@@ -852,30 +852,39 @@ mod tests {
 
     /// A full round trip on a machine whose platform authenticator enables PRF.
     ///
-    /// Ignored by default: it shows Hello prompts and needs a real user to complete
-    /// them. Run it deliberately on the acceptance machine:
+    /// Ignored by default: it shows **three** Windows Hello prompts (create the
+    /// credential, wrap, unwrap) and needs a real user to complete them. Run it
+    /// deliberately on the acceptance machine:
     ///
     /// ```text
     /// cargo test --features mock -- --ignored --nocapture
     /// ```
     ///
-    /// On a machine where the platform creates the credential but reports PRF as
-    /// disabled, the test verifies the honest fallback instead of failing: `create`
-    /// must return [`Error::Unavailable`] and `availability` must then report the same
-    /// state.
+    /// The output says which outcome happened:
+    ///
+    /// - `RESULT: roundtrip OK` — the platform released the `hmac-secret`, the wrapped
+    ///   master key came back, and the credential was deleted;
+    /// - `RESULT: PRF UNAVAILABLE: ...` — the platform created the credential but did
+    ///   not enable the PRF extension. The test passes to show that the store fails
+    ///   closed, but **this machine cannot run the Windows L3 path**.
     #[test]
     #[ignore = "requires an enrolled Windows Hello account and shows prompts"]
     fn hello_roundtrip() {
+        // SAFETY: no arguments and no preconditions.
+        let api_version = unsafe { WebAuthNGetApiVersionNumber() };
         let store = WindowsKeyStore::new();
+        println!("WebAuthN API version: {api_version}");
+        println!("availability: {:?}", store.availability());
+
         if !store.availability().is_available() {
-            println!("no platform authenticator; nothing to test");
+            println!("RESULT: SKIPPED (no user-verifying platform authenticator)");
             return;
         }
 
         match store.create() {
-            Ok(()) => {}
+            Ok(()) => println!("create: ok (Hello prompt completed)"),
             Err(Error::Unavailable { reason }) => {
-                println!("platform reported unavailable: {reason}");
+                println!("RESULT: PRF UNAVAILABLE: {reason}");
                 assert!(matches!(
                     store.availability(),
                     Availability::Unavailable { .. }
@@ -886,14 +895,18 @@ mod tests {
         }
 
         let master = MasterKey::generate().expect("randomness");
-        let blob = store.wrap(&master).expect("wrap");
-        let restored = store.unwrap(&blob).expect("unwrap");
+        let blob = store.wrap(&master).expect("wrap (Hello prompt)");
+        println!("wrap: ok");
+        let restored = store.unwrap(&blob).expect("unwrap (Hello prompt)");
         assert_eq!(restored, master);
+        println!("unwrap: ok, the same master key came back");
 
         store.delete_blob(&blob).expect("delete the credential");
         assert!(
             store.unwrap(&blob).is_err(),
             "a deleted credential still unwraps"
         );
+        println!("delete: ok, the old blob no longer unwraps");
+        println!("RESULT: roundtrip OK");
     }
 }
