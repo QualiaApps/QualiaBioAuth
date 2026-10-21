@@ -138,6 +138,79 @@ const NTE_DEVICE_NOT_READY: i32 = 0x8009_0030_u32 as i32;
 /// `NTE_NOT_FOUND`: the credential has already been deleted.
 const NTE_NOT_FOUND: i32 = 0x8009_0011_u32 as i32;
 
+/// `WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS`, version 9.
+///
+/// Windows 11 25H2 exposes WebAuthn API 9. The version 7 struct that
+/// `windows-sys 0.61` ships is rejected by that runtime with
+/// `NTE_INVALID_PARAMETER` (`0x80090027`) for a platform credential. The v7 prefix is
+/// kept byte-for-byte; the fields after `pbJsonExt` are the v8/v9 additions from
+/// `webauthn.h`.
+#[allow(non_snake_case, clippy::missing_docs_in_private_items)]
+#[repr(C)]
+struct MakeCredentialOptionsV9 {
+    dwVersion: u32,
+    dwTimeoutMilliseconds: u32,
+    CredentialList: WEBAUTHN_CREDENTIALS,
+    Extensions: WEBAUTHN_EXTENSIONS,
+    dwAuthenticatorAttachment: u32,
+    bRequireResidentKey: i32,
+    dwUserVerificationRequirement: u32,
+    dwAttestationConveyancePreference: u32,
+    dwFlags: u32,
+    pCancellationId: *mut core::ffi::c_void,
+    pExcludeCredentialList: *mut core::ffi::c_void,
+    dwEnterpriseAttestation: u32,
+    dwLargeBlobSupport: u32,
+    bPreferResidentKey: i32,
+    bBrowserInPrivateMode: i32,
+    bEnablePrf: i32,
+    pLinkedDevice: *mut core::ffi::c_void,
+    cbJsonExt: u32,
+    pbJsonExt: *mut u8,
+    pPRFGlobalEval: *mut WEBAUTHN_HMAC_SECRET_SALT,
+    cCredentialHints: u32,
+    ppwszCredentialHints: *mut *const u16,
+    bThirdPartyPayment: i32,
+    pwszRemoteWebOrigin: *const u16,
+    cbPublicKeyCredentialCreationOptionsJSON: u32,
+    pbPublicKeyCredentialCreationOptionsJSON: *mut u8,
+    cbAuthenticatorId: u32,
+    pbAuthenticatorId: *mut u8,
+}
+
+/// `WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS`, version 9.
+#[allow(non_snake_case, clippy::missing_docs_in_private_items)]
+#[repr(C)]
+struct GetAssertionOptionsV9 {
+    dwVersion: u32,
+    dwTimeoutMilliseconds: u32,
+    CredentialList: WEBAUTHN_CREDENTIALS,
+    Extensions: WEBAUTHN_EXTENSIONS,
+    dwAuthenticatorAttachment: u32,
+    dwUserVerificationRequirement: u32,
+    dwFlags: u32,
+    pwszU2fAppId: *const u16,
+    pbU2fAppId: *mut i32,
+    pCancellationId: *mut core::ffi::c_void,
+    pAllowCredentialList: *mut core::ffi::c_void,
+    dwCredLargeBlobOperation: u32,
+    cbCredLargeBlob: u32,
+    pbCredLargeBlob: *mut u8,
+    pHmacSecretSaltValues: *mut WEBAUTHN_HMAC_SECRET_SALT_VALUES,
+    bBrowserInPrivateMode: i32,
+    pLinkedDevice: *mut core::ffi::c_void,
+    bAutoFill: i32,
+    cbJsonExt: u32,
+    pbJsonExt: *mut u8,
+    cCredentialHints: u32,
+    ppwszCredentialHints: *mut *const u16,
+    pwszRemoteWebOrigin: *const u16,
+    cbPublicKeyCredentialRequestOptionsJSON: u32,
+    pbPublicKeyCredentialRequestOptionsJSON: *mut u8,
+    cbAuthenticatorId: u32,
+    pbAuthenticatorId: *mut u8,
+}
+
 /// A Windows auth-bound store backed by a Windows Hello credential.
 ///
 /// The credential id is kept in memory after [`AuthBoundKeyStore::create`]. A store
@@ -542,32 +615,82 @@ fn make_credential(hwnd: HWND) -> Result<Vec<u8>> {
         pExtensions: &mut hmac_extension,
     };
 
-    let options = WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS {
-        dwVersion: 7,
-        dwTimeoutMilliseconds: TIMEOUT_MS,
-        Extensions: extensions,
-        dwAuthenticatorAttachment: WEBAUTHN_AUTHENTICATOR_ATTACHMENT_PLATFORM,
-        bRequireResidentKey: 0,
-        dwUserVerificationRequirement: WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED,
-        dwAttestationConveyancePreference: WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_NONE,
-        bEnablePrf: 1,
-        ..Default::default()
-    };
-
     let mut attestation: *mut WEBAUTHN_CREDENTIAL_ATTESTATION = std::ptr::null_mut();
     // SAFETY: every pointer argument points at a live value for the duration of the
     // call; `attestation` is a valid out pointer. The API returns an owned object on
     // success, freed exactly once below.
-    let status = unsafe {
-        WebAuthNAuthenticatorMakeCredential(
-            hwnd,
-            &relying_party,
-            &user,
-            &parameter_list,
-            &client,
-            &options,
-            &mut attestation,
-        )
+    let status = if api_version() >= 9 {
+        let options = MakeCredentialOptionsV9 {
+            dwVersion: 9,
+            dwTimeoutMilliseconds: TIMEOUT_MS,
+            CredentialList: WEBAUTHN_CREDENTIALS {
+                cCredentials: 0,
+                pCredentials: std::ptr::null_mut(),
+            },
+            Extensions: extensions,
+            dwAuthenticatorAttachment: WEBAUTHN_AUTHENTICATOR_ATTACHMENT_PLATFORM,
+            bRequireResidentKey: 1,
+            dwUserVerificationRequirement: WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED,
+            dwAttestationConveyancePreference: WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_NONE,
+            dwFlags: 0,
+            pCancellationId: std::ptr::null_mut(),
+            pExcludeCredentialList: std::ptr::null_mut(),
+            dwEnterpriseAttestation: 0,
+            dwLargeBlobSupport: 0,
+            bPreferResidentKey: 0,
+            bBrowserInPrivateMode: 0,
+            bEnablePrf: 1,
+            pLinkedDevice: std::ptr::null_mut(),
+            cbJsonExt: 0,
+            pbJsonExt: std::ptr::null_mut(),
+            pPRFGlobalEval: std::ptr::null_mut(),
+            cCredentialHints: 0,
+            ppwszCredentialHints: std::ptr::null_mut(),
+            bThirdPartyPayment: 0,
+            pwszRemoteWebOrigin: std::ptr::null(),
+            cbPublicKeyCredentialCreationOptionsJSON: 0,
+            pbPublicKeyCredentialCreationOptionsJSON: std::ptr::null_mut(),
+            cbAuthenticatorId: 0,
+            pbAuthenticatorId: std::ptr::null_mut(),
+        };
+        // SAFETY: every pointer points at a live value and the out pointer is valid; the
+        // options are the v9 prefix-compatible layout the API reads by `dwVersion`.
+        unsafe {
+            WebAuthNAuthenticatorMakeCredential(
+                hwnd,
+                &relying_party,
+                &user,
+                &parameter_list,
+                &client,
+                (&options as *const MakeCredentialOptionsV9)
+                    .cast::<WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS>(),
+                &mut attestation,
+            )
+        }
+    } else {
+        let options = WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS {
+            dwVersion: 7,
+            dwTimeoutMilliseconds: TIMEOUT_MS,
+            Extensions: extensions,
+            dwAuthenticatorAttachment: WEBAUTHN_AUTHENTICATOR_ATTACHMENT_PLATFORM,
+            bRequireResidentKey: 0,
+            dwUserVerificationRequirement: WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED,
+            dwAttestationConveyancePreference: WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_NONE,
+            bEnablePrf: 1,
+            ..Default::default()
+        };
+        // SAFETY: every pointer points at a live value and the out pointer is valid.
+        unsafe {
+            WebAuthNAuthenticatorMakeCredential(
+                hwnd,
+                &relying_party,
+                &user,
+                &parameter_list,
+                &client,
+                &options,
+                &mut attestation,
+            )
+        }
     };
     if status < 0 {
         return Err(map_status("WebAuthNAuthenticatorMakeCredential", status));
@@ -645,31 +768,82 @@ fn get_hmac_secret(
         pwszCredentialType: WEBAUTHN_CREDENTIAL_TYPE_PUBLIC_KEY,
     };
 
-    let options = WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS {
-        dwVersion: 7,
-        dwTimeoutMilliseconds: TIMEOUT_MS,
-        CredentialList: WEBAUTHN_CREDENTIALS {
-            cCredentials: 1,
-            pCredentials: &mut credential,
-        },
-        dwUserVerificationRequirement: WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED,
-        dwFlags: WEBAUTHN_AUTHENTICATOR_HMAC_SECRET_VALUES_FLAG,
-        pHmacSecretSaltValues: &mut salt_values,
-        ..Default::default()
-    };
-
+    let rp_id = wide(RP_ID);
     let mut assertion: *mut WEBAUTHN_ASSERTION = std::ptr::null_mut();
     // SAFETY: every pointer argument points at a live value for the duration of the
     // call; `assertion` is a valid out pointer. The API returns an owned object on
     // success, freed exactly once below.
-    let status = unsafe {
-        WebAuthNAuthenticatorGetAssertion(
-            hwnd,
-            wide(RP_ID).as_ptr(),
-            &client,
-            &options,
-            &mut assertion,
-        )
+    let status = if api_version() >= 9 {
+        let options = GetAssertionOptionsV9 {
+            dwVersion: 9,
+            dwTimeoutMilliseconds: TIMEOUT_MS,
+            CredentialList: WEBAUTHN_CREDENTIALS {
+                cCredentials: 1,
+                pCredentials: &mut credential,
+            },
+            Extensions: WEBAUTHN_EXTENSIONS {
+                cExtensions: 0,
+                pExtensions: std::ptr::null_mut(),
+            },
+            dwAuthenticatorAttachment: 0,
+            dwUserVerificationRequirement: WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED,
+            dwFlags: WEBAUTHN_AUTHENTICATOR_HMAC_SECRET_VALUES_FLAG,
+            pwszU2fAppId: std::ptr::null(),
+            pbU2fAppId: std::ptr::null_mut(),
+            pCancellationId: std::ptr::null_mut(),
+            pAllowCredentialList: std::ptr::null_mut(),
+            dwCredLargeBlobOperation: 0,
+            cbCredLargeBlob: 0,
+            pbCredLargeBlob: std::ptr::null_mut(),
+            pHmacSecretSaltValues: &mut salt_values,
+            bBrowserInPrivateMode: 0,
+            pLinkedDevice: std::ptr::null_mut(),
+            bAutoFill: 0,
+            cbJsonExt: 0,
+            pbJsonExt: std::ptr::null_mut(),
+            cCredentialHints: 0,
+            ppwszCredentialHints: std::ptr::null_mut(),
+            pwszRemoteWebOrigin: std::ptr::null(),
+            cbPublicKeyCredentialRequestOptionsJSON: 0,
+            pbPublicKeyCredentialRequestOptionsJSON: std::ptr::null_mut(),
+            cbAuthenticatorId: 0,
+            pbAuthenticatorId: std::ptr::null_mut(),
+        };
+        // SAFETY: every pointer points at a live value and the out pointer is valid; the
+        // options are the v9 prefix-compatible layout the API reads by `dwVersion`.
+        unsafe {
+            WebAuthNAuthenticatorGetAssertion(
+                hwnd,
+                rp_id.as_ptr(),
+                &client,
+                (&options as *const GetAssertionOptionsV9)
+                    .cast::<WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS>(),
+                &mut assertion,
+            )
+        }
+    } else {
+        let options = WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS {
+            dwVersion: 7,
+            dwTimeoutMilliseconds: TIMEOUT_MS,
+            CredentialList: WEBAUTHN_CREDENTIALS {
+                cCredentials: 1,
+                pCredentials: &mut credential,
+            },
+            dwUserVerificationRequirement: WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED,
+            dwFlags: WEBAUTHN_AUTHENTICATOR_HMAC_SECRET_VALUES_FLAG,
+            pHmacSecretSaltValues: &mut salt_values,
+            ..Default::default()
+        };
+        // SAFETY: every pointer points at a live value and the out pointer is valid.
+        unsafe {
+            WebAuthNAuthenticatorGetAssertion(
+                hwnd,
+                rp_id.as_ptr(),
+                &client,
+                &options,
+                &mut assertion,
+            )
+        }
     };
     if status < 0 {
         return Err(map_status("WebAuthNAuthenticatorGetAssertion", status));
