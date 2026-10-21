@@ -383,11 +383,20 @@ impl AuthBoundKeyStore for WindowsKeyStore {
     }
 }
 
+/// The WebAuthn API version this Windows build exposes.
+///
+/// Version 7 is the first one whose structures carry the HMAC-secret salt values; a
+/// lower number means this backend cannot work at all. The number is public so that a
+/// diagnostic run can report it next to the outcome.
+#[must_use]
+pub fn api_version() -> u32 {
+    // SAFETY: no arguments and no preconditions.
+    unsafe { WebAuthNGetApiVersionNumber() }
+}
+
 /// Reports what this machine supports.
 fn availability() -> Availability {
-    // SAFETY: no arguments and no preconditions.
-    let version = unsafe { WebAuthNGetApiVersionNumber() };
-    if version < MIN_API_VERSION {
+    if api_version() < MIN_API_VERSION {
         return Availability::Unavailable {
             reason: "this Windows version does not expose the WebAuthn hmac-secret extension",
         };

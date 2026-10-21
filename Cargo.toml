@@ -73,6 +73,13 @@ mock = ["dep:getrandom"]
 # dependencies it needs must be present for tests too.
 getrandom = "0.4.3"
 
+# The acceptance diagnostic. It needs `MasterKey::generate` to produce a throwaway
+# key, so it is only built with the mock feature explicitly.
+[[bin]]
+name = "hello_probe"
+path = "src/bin/hello_probe.rs"
+required-features = ["mock"]
+
 [lints.rust]
 missing_docs = "warn"
 unsafe_op_in_unsafe_fn = "deny"
